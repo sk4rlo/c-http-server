@@ -4,7 +4,7 @@
  * used by the server.
  */
 
-//if HTTP_H has not been defined yet, continue
+// if HTTP_H has not been defined yet, continue
 #ifndef HTTP_H
 
 #include <stddef.h>

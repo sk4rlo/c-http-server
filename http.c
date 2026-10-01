@@ -63,7 +63,7 @@ int parse_http_request(const char *buffer, size_t len, http_request_header *requ
     /* save request line and copy buffer after the first line is found */
     size_t line_len = end_index;
     char *request_line = malloc(line_len + 1);
-    //safety check for malloc
+    // safety check for malloc
     if (request_line == NULL) return -1;
 
     /* copies line_len bytes from buffer to request_line */
@@ -77,11 +77,11 @@ int parse_http_request(const char *buffer, size_t len, http_request_header *requ
     /* save request_line words in http request header struct fields */
     for(size_t i = 0; i < line_len; i++){
          
-        //advance the index and save a word every time you find a space
+        // advance the index and save a word every time you find a space
         if(request_line[i] == ' '){
             word_length = i - word_start;
 
-            //first word is method, second is path, third is version
+            // first word is method, second is path, third is version
             if (word_index == 0){
                 if(copy_token(request_header->method, sizeof(request_header->method),
                  request_line + word_start, word_length) < 0) {
@@ -101,13 +101,13 @@ int parse_http_request(const char *buffer, size_t len, http_request_header *requ
         }        
     }
 
-    //if there are not 2 spaces in request header return error
+    // if there are not 2 spaces in request header return error
     if (word_index!=2) {
         free(request_line);
         return -1;
     }
 
-    //final word is handled after the loop as it has different conditions 
+    // final word is handled after the loop as it has different conditions 
     if(copy_token(request_header->version, sizeof(request_header->version),
                  request_line + word_start, line_len - word_start) < 0) {
     free(request_line);

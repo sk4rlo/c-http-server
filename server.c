@@ -22,7 +22,7 @@
 
 //----------------global variables------------------------
 
-//number of pending connection supported by the server
+// number of pending connection supported by the server
 #define BACKLOG 5
 
 #define STATIC_ROOT "files"
@@ -31,18 +31,18 @@
 
 struct timespec start;
 struct timespec end;
-//-----------------errors aand logs------------------------
+//-----------------errors and logs------------------------
 
 void err_sys(const char *fmt, ...){
 
-    //initialize variable arguments
+    // initialize variable arguments
     va_list args;
 
-    //starts to read arguments after fmt
+    // starts to read arguments after fmt
     va_start(args, fmt);
-    //print the custom formatted error message to stderr
+    // print the custom formatted error message to stderr
     vfprintf(stderr, fmt, args);
-    //clean up variable-argument handling
+    // clean up variable-argument handling
     va_end(args);
 
     /* Convert the current errno value to a human-readable message
@@ -79,13 +79,13 @@ void log_request(const http_request_header *request,
 
 int serve_file(FILE *fp, http_response *response){
     
-    //set file position indicator
+    // set file position indicator
     if(fseek(fp, 0, SEEK_END) < 0){
         fclose(fp);
         return -1;
     } 
 
-    //get file size
+    // get file size
     long file_size = ftell(fp);
 
     if (file_size < 0) {
@@ -93,11 +93,11 @@ int serve_file(FILE *fp, http_response *response){
         return -1;
     }
 
-    //rewind the indicator at the start of the file
+    // rewind the indicator at the start of the file
     rewind(fp);
     
 
-    //allocate memory for body
+    // allocate memory for body
     response->body = malloc(file_size);
     response->owns_body = 1;
 
@@ -106,7 +106,7 @@ int serve_file(FILE *fp, http_response *response){
         return -1;
     }
 
-    //populate body reading from the file
+    // populate body reading from the file
     size_t nread = fread(response->body, 1, file_size, fp);
 
     if (nread != (size_t)file_size) {
@@ -131,7 +131,7 @@ int serve_request(http_response *response, http_request_header *request_header){
     if (strcmp(request_header->method, "GET") != 0) {
         response->status_code = 405; 
     } else if (strcmp(request_header->path, "/") == 0) {
-        //serve static plain text
+        // serve static plain text
         response->status_code = 200;
         response->content_type = "text/plain";
         response->body = "Hello from server\n";
@@ -141,13 +141,13 @@ int serve_request(http_response *response, http_request_header *request_header){
         response->status_code = 200;
         response->content_type = "text/html";
 
-        //build the local path from the request
+        // build the local path from the request
         char local_path[LOCAL_PATH_SIZE];
 
         int path_len = snprintf(local_path, sizeof(local_path), "%s%s",
                         STATIC_ROOT, request_header->path);
 
-        //return 400 if snprintf fails, path is too large, opr contains '..'
+        // return 400 if snprintf fails, path is too large, opr contains '..'
         if (path_len < 0 || (size_t)path_len >= sizeof(local_path) || 
             strstr(request_header->path, "..") != NULL)
         {
@@ -182,14 +182,14 @@ int send_all(int fd, const char *buffer, size_t size){
 
     while (total_sent < size) {
 
-        //normal send on first iteration (total sent = 0)
-        //then the buffer pointer is moved to the remaining butes to send
+        // normal send on first iteration (total sent = 0)
+        // then the buffer pointer is moved to the remaining butes to send
         ssize_t sent = send(fd, buffer + total_sent, size - total_sent, 0);
 
-        //checks for send errors 
+        // checks for send errors 
         if (sent <= 0) return -1;
 
-        //increase count of bytes sent
+        // increase count of bytes sent
         total_sent += sent;
     }
 
@@ -200,66 +200,126 @@ int send_all(int fd, const char *buffer, size_t size){
 
 int main(void){
 
-    //creation of the kernel object for socket
-    int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (fd<0){
-        err_sys("socket creation failed");
+    // definition of user space socket data structure (addr. family, port, address, padding)
+    struct sockaddr_in server_address; 
+    char *endptr;
+    long server_port;
+    const char *address_string;
+    const char *port_string;
+
+
+    // initialize server address user space struct
+    bzero(&server_address, sizeof(server_address));
+
+    // set address family in the sockaddr_in user space socket structure
+    server_address.sin_family = AF_INET;
+    
+    /*
+     * read environmantal variables with fallback on default values.
+     * value = (condition) ? value if true : value if false 
+     * is the variable set? if true value is ... : if false is   
+     *
+     */
+
+    port_string = (getenv("PORT") != 0) ? getenv("PORT") : "8080"; 
+    address_string = (getenv("LISTEN_ADDR") != NULL) ? getenv("LISTEN_ADDR") : "127.0.0.1";
+
+    // convert port string to a long
+    server_port = strtol(port_string, &endptr, 10);
+
+    /*
+     * For the port: htons swaps bytes, because the host is little endian
+     * and the network uses big endian. For the address: inet_pton converts text to binary,
+     * and already gives network byte order, so no swap is needed.
+     *
+     */
+
+    if((*endptr != '\0')||((server_port < 1024) || (server_port > 65535))){
+        fprintf(stderr, "Invalid PORT '%s': it must be a number between 1024 and 65535\n", port_string);
+        exit(1);
+    } else server_address.sin_port = htons(server_port);
+
+    if(inet_pton(AF_INET, address_string, &server_address.sin_addr)!=1) {
+        fprintf(stderr, "Invalid LISTEN_ADDR '%s'\n", address_string);
+        exit(1);
     }
 
-    //definition of socket data structure server IPv4 field
-    struct sockaddr_in server_address;
+    /*
+     * Current host is little endian while network order is big endian,
+     * so you need to swap bytes to read values correctly.
+     * For IP there is an additional format passage as you should group the result   
+     * using one byte (or 2 hex digits) before being converted to a human readable format.
+     * In this case for the address the inet_pton function provides the full conversion.
+     *
+     * to see the final structure content:
+     * printf("port: %d\n", server_address.sin_port);
+     * printf("ip number: %u\n", server_address.sin_addr.s_addr);
+     *
+     */
 
-    bzero(&server_address, sizeof(server_address));
-    server_address.sin_family = AF_INET;
-    server_address.sin_port = htons(8080);
-    server_address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    // creation of the kernel object for socket (sock), represented as a file descriptor
+    int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (fd<0){
+        err_sys("Socket creation failed\n");
+    }
 
 
-    //binding of address information to socket object 
-    if (bind(fd, (struct sockaddr *)&server_address,
+    /*
+     * Binding of server address information to socket object. 
+     * The kernel reads family port and anddress and pass the values to 
+     * kernel space socket-related structures.
+     *
+     */
+
+    if (bind(fd, (struct sockaddr *) &server_address,
         sizeof(server_address)) != 0){
         err_sys("failed to bind %d to port %d\n", fd, ntohs(server_address.sin_port));
     }
 
     /*
-     * those variables are in network format (big endian) since previously converted.
-     * current host is litle endian, so you need to convert and swap bytes.
-     * for IP there is an additional format passage as you should group the result   
-     * using one byte (or 2 hex digits) before being converted to a human readable format 
-     *
-     * printf("port: %d\n", server_address.sin_port);
-     * printf("ip number: %u\n", server_address.sin_addr.s_addr);
-     *   
+     * Start listening to accept incoming connections:
+     * the state of socket structures becomes TCP_LISTEN and so the kernel
+     * is able to accept a queue of incoming connections from clients
+     * which are able to initialize an handshake  under the hood.
+     * 
      */
 
-
-    //start listening to accept incoming connections
     if (listen(fd, BACKLOG) < 0){
         err_sys("failed to listen on port %d\n", ntohs(server_address.sin_port));
     } else {
         printf("started listening on port %d\n", ntohs(server_address.sin_port));
     }
 
-    //definition of socket data structure client IPv4 field
+    // definition of client socket data structure (addr. family, port, address, padding)
     struct sockaddr_in client_address;
 
-    //loop to manage client connections
+    // loop to manage client connections
     while(1){
 
-        //save client address lenght
+        // save client address lenght
         socklen_t client_address_len = sizeof(client_address);
 
-        //accept connection from a client address
-        int client_fd = accept(fd, (struct sockaddr *) & client_address, &client_address_len); 
+        /*
+        * Accept connection from a client address:
+        * the server process sleep until a child of the listening kernel socket (sock)
+        * is in the queue. A new socket kernel structure is created for the child 
+        * represented as a file descriptor.
+        *
+        * On the user space, it fills the client information of the user space socket     
+        * (sockaddr_in client_address) so now the 4 tuple (client and server port and ip)
+        * is complete. 
+        *
+        */
+
+        int client_fd = accept(fd, (struct sockaddr *) &client_address, &client_address_len); 
         if (client_fd < 0) {
             err_sys("failed to accept connection\n");
         }
 
-        
         // Application buffer where recv copies bytes from the socket.
         char buffer[REQUEST_BUFFER_SIZE];
 
-        //read request from client_fd
+        // read request from client_fd
         ssize_t rn = recv(client_fd, buffer, REQUEST_BUFFER_SIZE - 1, 0);
         if (rn < 0){
             err_sys("failed to read from socket\n");
@@ -282,7 +342,7 @@ int main(void){
         char *response_string = NULL;
         size_t response_size = 0;
 
-        //store the parser result and then checks for error
+        // store the parser result and then checks for error
         int parse_result = parse_http_request(buffer, rn, &request_header);
 
         /* error 400: bad request if parser fails due to malformed syntax,
@@ -307,7 +367,7 @@ int main(void){
         }
 
         if (response_string != NULL) {
-            //wrapper for send syscall
+            // wrapper for send syscall
             if(send_all(client_fd, response_string, response_size) < 0){
                 fprintf(stderr, "send failed\n");
                 goto cleanup;
@@ -317,11 +377,11 @@ int main(void){
         } else {
             clock_gettime(CLOCK_MONOTONIC, &end);
             fprintf(stderr, "failed to build response string\n");
-            //if parse result < 0 use NULL, else use request_header
+            // if parse result < 0 use NULL, else use request_header
             log_request(parse_result < 0 ? NULL : &request_header, &response, start, end);
         }
         
-    //that check is needed to avoid freeing a string literal (undefined behaviour)
+    // that check is needed to avoid freeing a string literal (undefined behaviour)
     cleanup:
         if (response.owns_body) {
             free(response.body);
