@@ -48,8 +48,8 @@ int parse_http_request(const char *buffer, size_t len, http_request_header *requ
     int found = 0;
 
     /* populate the http request line reading the first line from the buffer.
-     * sicne the loop reads i+1 index, it can read the element buffer[len] 
-     * which is outside the boundary. For this reason the for loop uses len-1 */
+     * since the loop reads i+1 index, it can read the element buffer[len] 
+     * which is outside the boundary. For this reason the for loop uses i+1 */
     for(size_t i = 0; i + 1 < len; i++){
         if(buffer[i] == '\r' && buffer[i+1] == '\n'){
             end_index = i;
@@ -144,7 +144,7 @@ char *make_response_string(http_response *response, size_t *out_size){
     ); 
     
     /* allocates memory for http response string (metadata + body)
-     * header + null term + length of body content*/
+     * header + null term + length of body content */
     char *response_string = malloc(header_len + 1 + response->content_length);
     if (response_string == NULL) return NULL;
 

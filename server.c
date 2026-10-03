@@ -18,6 +18,7 @@
 #include <stdarg.h>
 #include <string.h>
 #include <time.h>
+#include <limits.h>
 #include "http.h"
 
 //----------------global variables------------------------
@@ -53,11 +54,9 @@ void err_sys(const char *fmt, ...){
     exit(1);
 }
 
-void log_request(const http_request_header *request,
-                const http_response *response,
-                struct timespec start,
-                struct timespec end)
-{   
+void log_request(const http_request_header *request, const http_response *response,
+                struct timespec start, struct timespec end)
+{
     double elapsed_ms = (end.tv_sec - start.tv_sec) * 1000.0 +
         (end.tv_nsec - start.tv_nsec) / 1000000.0;
 
@@ -122,21 +121,39 @@ int serve_file(FILE *fp, http_response *response){
     return 0;
 }
 
-/* this is a wrapper of build_response needed for succesful request*/
+// this is a wrapper of build_response needed for succesful requests
 int serve_request(http_response *response, http_request_header *request_header){
 
-    if(response == NULL || request_header == NULL) return -1;
-    
-
-    if (strcmp(request_header->method, "GET") != 0) {
-        response->status_code = 405; 
-    } else if (strcmp(request_header->path, "/") == 0) {
+    // check not null requests and supported methods
+    if (response == NULL || request_header == NULL) return -1;
+    if (strcmp(request_header->method, "GET") != 0){
+        response->status_code = 405;
+    //split health outputs when implementing multi-thread
+    } else if((strcmp(request_header->path, "/") == 0) || 
+        (strcmp(request_header->path, "/healthz") == 0) || 
+        (strcmp(request_header->path, "/readyz") == 0))
+    {
         // serve static plain text
         response->status_code = 200;
         response->content_type = "text/plain";
         response->body = "Hello from server\n";
         response->content_length = strlen(response->body);
         response->owns_body = 0;
+    } else if(strcmp(request_header->path, "/hostname")==0)
+    {
+        // +1 because of null terminator
+        char hostname[HOST_NAME_MAX+1];
+        if((gethostname(hostname, sizeof(hostname)) == 0)){
+            response->status_code = 200;
+            response->body = malloc(sizeof(hostname));
+            if(response->body != NULL){
+            //write hostname into response body, freed later by main as owns_body = 1
+                snprintf(response->body, sizeof(hostname), "%s", hostname);
+                response->content_type = "text/plain";
+                response->content_length = strlen(response->body);
+                response->owns_body = 1;
+            } else  response->status_code = 500;
+        } else response->status_code = 500;
     } else {
         response->status_code = 200;
         response->content_type = "text/html";
@@ -144,10 +161,11 @@ int serve_request(http_response *response, http_request_header *request_header){
         // build the local path from the request
         char local_path[LOCAL_PATH_SIZE];
 
+        // static root needed to search the full path (a guard for root fs)
         int path_len = snprintf(local_path, sizeof(local_path), "%s%s",
                         STATIC_ROOT, request_header->path);
 
-        // return 400 if snprintf fails, path is too large, opr contains '..'
+        // return 400 if snprintf fails, path is too large, or contains '..'
         if (path_len < 0 || (size_t)path_len >= sizeof(local_path) || 
             strstr(request_header->path, "..") != NULL)
         {
