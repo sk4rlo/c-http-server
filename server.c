@@ -19,6 +19,7 @@
 #include <string.h>
 #include <time.h>
 #include <limits.h>
+#include <signal.h>
 #include "http.h"
 
 //----------------global variables------------------------
@@ -218,6 +219,12 @@ int send_all(int fd, const char *buffer, size_t size){
 
 int main(void){
 
+    // unbuffer calls writing to stdout to show logs in docker
+    setvbuf(stdout, NULL, _IOLBF, 0);
+
+    // prevent terminate signals which stops the process when send fails (e.g. closed TCP connection)
+    signal(SIGPIPE, SIG_IGN);
+
     // definition of user space socket data structure (addr. family, port, address, padding)
     struct sockaddr_in server_address; 
     char *endptr;
@@ -278,7 +285,7 @@ int main(void){
     // creation of the kernel object for socket (sock), represented as a file descriptor
     int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (fd<0){
-        err_sys("Socket creation failed\n");
+        err_sys("Socket creation failed");
     }
 
 
@@ -291,7 +298,7 @@ int main(void){
 
     if (bind(fd, (struct sockaddr *) &server_address,
         sizeof(server_address)) != 0){
-        err_sys("failed to bind %d to port %d\n", fd, ntohs(server_address.sin_port));
+        err_sys("failed to bind %d to port %d", fd, ntohs(server_address.sin_port));
     }
 
     /*
@@ -303,9 +310,11 @@ int main(void){
      */
 
     if (listen(fd, BACKLOG) < 0){
-        err_sys("failed to listen on port %d\n", ntohs(server_address.sin_port));
+        err_sys("failed to listen on port %s and address %s",
+            port_string, address_string );
     } else {
-        printf("started listening on port %d\n", ntohs(server_address.sin_port));
+        printf("started listening on port %s and address %s\n",
+            port_string, address_string);
     }
 
     // definition of client socket data structure (addr. family, port, address, padding)
@@ -331,7 +340,8 @@ int main(void){
 
         int client_fd = accept(fd, (struct sockaddr *) &client_address, &client_address_len); 
         if (client_fd < 0) {
-            err_sys("failed to accept connection\n");
+            fprintf(stderr, "failed to accept connection: %s\n", strerror(errno));
+            continue;
         }
 
         // Application buffer where recv copies bytes from the socket.
@@ -340,9 +350,11 @@ int main(void){
         // read request from client_fd
         ssize_t rn = recv(client_fd, buffer, REQUEST_BUFFER_SIZE - 1, 0);
         if (rn < 0){
-            err_sys("failed to read from socket\n");
+            fprintf(stderr, "failed to read from socket: %s\n", strerror(errno));
+            close(client_fd);
+            continue;
         } else if (rn == 0){
-            printf("client disconnected\n");
+            fprintf(stderr, "client disconnected\n");
             close(client_fd);
             continue;
         } else {
